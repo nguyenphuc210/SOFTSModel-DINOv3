@@ -148,16 +148,3 @@ python check_forward.py
 - **QCVN 05:2023/BTNMT:** National Technical Regulation on Ambient Air Quality, Ministry of Natural Resources and Environment, Vietnam.
 
 ---
-
-## 7. GitHub Submission Guide
-
-To publish and submit this repository for Practical Assignment 2 (Requirement 1):
-
-```bash
-git init
-git add .
-git commit -m "feat: replace SOFTS encoder with DINOv3 ViT-S/16 backbone"
-git branch -M main
-git remote add origin https://github.com/<YOUR_USERNAME>/<REPO_NAME>.git
-git push -u origin main
-```
