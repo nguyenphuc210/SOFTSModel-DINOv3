@@ -1,26 +1,25 @@
-# SOFTS — thay encoder bằng DINOv3
+# SOFTS — Replacing Encoder with DINOv3 Backbone
 
-Yêu cầu 1 của bài thực hành: **thay encoder của SOFTS bằng DINOv3** (mô hình có encoder, nên không đụng backbone theo nghĩa khác). Decoder (`projection`) và embedding inverted giữ nguyên.
+Practical Assignment 2 Requirement 1: **Replace the SOFTS encoder with DINOv3** (the model features an encoder, preserving the original backbone architecture semantics). The decoder (`projection`) and inverted embedding (`DataEmbedding_inverted`) remain unchanged.
 
-Repo gốc: [Secilia-Cxy/SOFTS](https://github.com/Secilia-Cxy/SOFTS) — *SOFTS: Efficient Multivariate Time Series Forecasting with Series-Core Fusion* (NeurIPS 2024).
-
-DINOv3: Meta, ViT-S/16 (`dinov3_vits16`, embed 384, 12 block, 6 head, 4 register token, RoPE 2D, LayerScale 1e-5). Đặc tả lấy từ [facebookresearch/dinov3](https://github.com/facebookresearch/dinov3) `dinov3/hub/backbones.py`.
+- **Upstream Repository:** [Secilia-Cxy/SOFTS](https://github.com/Secilia-Cxy/SOFTS) — *SOFTS: Efficient Multivariate Time Series Forecasting with Series-Core Fusion* (NeurIPS 2024).
+- **DINOv3 Backbone:** Meta AI, ViT-S/16 (`dinov3_vits16`, embedding dimension 384, 12 blocks, 6 heads, 4 register tokens, 2D Axial RoPE, LayerScale init $10^{-5}$). Architecture specifications derived from [facebookresearch/dinov3](https://github.com/facebookresearch/dinov3) (`dinov3/hub/backbones.py`).
 
 ---
 
-## 1. Phạm vi thay đổi (Scope)
+## 1. Scope of Modifications
 
-| Thành phần | Triển khai thực tế | Trạng thái |
+| Component | Actual Implementation | Status |
 |---|---|---|
-| **Backbone / Encoder** | `DINOv3Encoder` trong [`layers/DINOv3Encoder.py`](layers/DINOv3Encoder.py) | **Thay thế hoàn toàn (Mới)** |
-| **Replaced module** | Module `STAR` (Aggregate - Redistribute) + `EncoderLayer` | **Bỏ khỏi luồng suy luận** |
-| **Preserved modules** | `DataEmbedding_inverted`, `projection` head, instance norm/denorm | **Giữ nguyên 100% chuẩn SOFTS** |
+| **Backbone / Encoder** | `DINOv3Encoder` in [`layers/DINOv3Encoder.py`](layers/DINOv3Encoder.py) | **Fully Replaced (New)** |
+| **Replaced Module** | `STAR` (Aggregate - Redistribute) + `EncoderLayer` | **Removed from inference path** |
+| **Preserved Modules** | `DataEmbedding_inverted`, `projection` head, instance norm/denorm | **100% Retained (SOFTS standard)** |
 
 ```text
-Original SOFTS (NeurIPS 2024):
+Original SOFTS Pipeline (NeurIPS 2024):
   x [B, T, C] → DataEmbedding_inverted → STAR Modules (Core Fusion) → Linear Projection → Forecast [B, H, C]
 
-SOFTS-DINOv3 (Kiến trúc đề xuất):
+SOFTS-DINOv3 Pipeline (Proposed Architecture):
   x [B, T, C] → DataEmbedding_inverted → DINOv3 ViT-S/16 Backbone → Linear Projection → Forecast [B, H, C]
                                            ├── Adapter in_proj (d_model → 384)
                                            ├── 2D Axial RoPE Grid + 1 CLS + 4 Register Tokens
@@ -30,22 +29,22 @@ SOFTS-DINOv3 (Kiến trúc đề xuất):
 
 ---
 
-## 2. Chi tiết các file thay đổi (Chỉ chỗ update cho Thầy)
+## 2. Modified and New Files (Update Pointers for Review)
 
-Chỉ 2 file thay đổi so với bản gốc của upstream. Mọi đoạn thêm/sửa đều có comment rõ ràng `[DINOv3-UPDATE]`.
+Only two files differ from the original upstream repository. Every modified or newly added block is explicitly tagged with `[DINOv3-UPDATE]`.
 
-| Priority | File | Việc thực hiện | Dòng cần chỉ cho thầy |
+| Priority | Path | Description | Key Reference Lines |
 |---|---|---|---|
-| **Core (Mới)** | [`layers/DINOv3Encoder.py`](layers/DINOv3Encoder.py) | **File mới.** Triển khai DINOv3 ViT-S/16, chữ ký tương thích hoàn toàn `(x, attn_mask) -> (x, attns)`, với `x` là `[B, L, d_model]`. | Cả file |
-| **Core (Sửa)** | [`models/SOFTS.py`](models/SOFTS.py) | **Sửa.** Đổi import, khởi tạo `self.encoder = DINOv3Encoder(...)` thay cho `Encoder` + `EncoderLayer` + `STAR`. | Xem 3 mốc chi tiết bên dưới |
-| Base | `layers/Embed.py` | Không sửa. Copy nguyên bản để chạy độc lập. | — |
-| Deprecated | `layers/Transformer_EncDec.py` | **Không còn được import.** File gốc giữ nguyên để đối chiếu. | — |
+| **Core (New)** | [`layers/DINOv3Encoder.py`](layers/DINOv3Encoder.py) | **New file.** DINOv3 ViT-S/16 encoder with exact signature compatibility `(x, attn_mask) -> (x, attns)`, where `x` is `[B, L, d_model]`. | Entire file |
+| **Core (Modified)** | [`models/SOFTS.py`](models/SOFTS.py) | **Modified.** Updated imports and initialized `self.encoder = DINOv3Encoder(...)` replacing `Encoder` + `EncoderLayer` + `STAR`. | See 3 checkpoints below |
+| Base | `layers/Embed.py` | Unchanged. Copied for standalone execution. | — |
+| Deprecated | `layers/Transformer_EncDec.py` | **No longer imported.** Kept for reference and parity check. | — |
 
-### Ba mốc sửa trong `models/SOFTS.py`:
-Số dòng dưới đây là của bản đã cập nhật trong thư mục này:
+### Three Key Checkpoints in `models/SOFTS.py`:
+Line numbers refer to the updated version in this repository:
 
-1. **Import (Dòng 6–7):** Bỏ `from layers.Transformer_EncDec import Encoder, EncoderLayer`. Thêm `from layers.DINOv3Encoder import DINOv3Encoder`.
-2. **`Model.__init__` (Dòng 62–95, comment `[DINOv3-UPDATE]`):** Đây là trọng tâm thay thế encoder:
+1. **Imports (Lines 6–7):** Removed `from layers.Transformer_EncDec import Encoder, EncoderLayer`. Added `from layers.DINOv3Encoder import DINOv3Encoder`.
+2. **`Model.__init__` (Lines 62–95, commented `[DINOv3-UPDATE]`):** Encoder replacement core logic:
 ```python
 self.encoder = DINOv3Encoder(
     d_model=configs.d_model,
@@ -59,39 +58,35 @@ self.encoder = DINOv3Encoder(
     pretrained=getattr(configs, "dinov3_pretrained", False),
 )
 ```
-3. **`Model.forecast` (Dòng 110–114):** Gọi forward `enc_out, attns = self.encoder(...)`. Giữ nguyên đầu ra để nối thẳng vào `self.projection` (Dòng 98).
+3. **`Model.forecast` (Lines 110–114):** Forward call `enc_out, attns = self.encoder(...)`. Output tensor shape is preserved and fed directly into `self.projection` (Line 98).
 
 ---
 
+## 3. Rationale & Architecture Design
 
-## Vì sao làm kiểu này
+The SOFTS encoder receives multivariate series tokens after `DataEmbedding_inverted`: `[B, n_vars (+ covariates), d_model]`, rather than raw RGB pixels. DINOv3 is natively a Vision Transformer processing 2D images `B × 3 × H × W`.
 
-Encoder SOFTS nhận token chuỗi sau `DataEmbedding_inverted`: `[B, n_biến (+ covariate), d_model]`, không phải ảnh RGB. DINOv3 gốc là ViT nhận ảnh `B×3×H×W`.
+The adapter mechanism implemented in `DINOv3Encoder.forward`:
+1. `in_proj`: Linear adaptation from `d_model → 384` (DINOv3 width).
+2. Arranges multivariate series tokens onto a near-square spatial grid, padded to $H \times W$ (padded tokens are masked with $-\infty$ during self-attention).
+3. Prepends **1 [CLS] token + 4 register tokens** strictly following the official DINOv3 specification.
+4. Passes tokens through pre-norm transformer blocks: Multi-head Attention + 2D Axial RoPE (applied only to patch tokens, not prefix tokens) + MLP (expansion ratio 4.0) + LayerScale ($10^{-5}$).
+5. Final `LayerNorm`, prefixes and padding tokens stripped, followed by `out_proj`: `384 → d_model`.
 
-Cách thay, nằm trọn trong `DINOv3Encoder.forward`:
-
-1. `in_proj`: `d_model → 384` (adapter; trọng số pretrained **không** gồm lớp này).
-2. Xếp các series token thành lưới gần vuông, pad cho đủ `H×W` (pad không được attend, mask `-inf`).
-3. Ghép **1 CLS + 4 register token** phía trước, đúng DINOv3.
-4. Chạy các block pre-norm: Attention + RoPE 2D (chỉ trên patch token) + MLP ratio 4 + LayerScale.
-5. `LayerNorm`, bỏ prefix và pad, `out_proj`: `384 → d_model`.
-
-Không rasterize chuỗi thành ảnh rồi chạy patch-embed 16×16: làm vậy sẽ bỏ embedding inverted và phá interface `[B, pred_len, C]` mà `run.py` của SOFTS đang train. Yêu cầu là thay **encoder**, không thay cả mô hình.
-
-`mask_k_bias` của bản pretrain DINOv3 chỉ tác dụng khi có patch bị mask (iBOT). Forecasting không mask patch, nên Q/K/V là `nn.Linear` thường — cùng đường với forward không mask.
+*Note:* We avoid rasterizing numerical time series into synthetic 2D images with 16x16 patch extraction. Doing so would discard inverted temporal embedding and break the standard `[B, pred_len, C]` training interface used across time-series benchmark models.
 
 ---
 
-## Gắn vào repo SOFTS gốc
+## 4. Integration into Upstream SOFTS Repository
 
-Từ thư mục clone `SOFTS/`:
+From your cloned `SOFTS/` root:
 
 ```bash
-cp /đường/dẫn/softs-dinov3/layers/DINOv3Encoder.py layers/DINOv3Encoder.py
-cp /đường/dẫn/softs-dinov3/models/SOFTS.py models/SOFTS.py
+cp layers/DINOv3Encoder.py <SOFTS_ROOT>/layers/DINOv3Encoder.py
+cp models/SOFTS.py <SOFTS_ROOT>/models/SOFTS.py
 ```
 
-Không cần sửa `run.py`. Lệnh train cũ vẫn chạy, ví dụ:
+No changes to `run.py` are required. Standard training scripts remain fully functional:
 
 ```bash
 python run.py \
@@ -102,92 +97,62 @@ python run.py \
   --seq_len 96 --pred_len 96
 ```
 
-`d_core` vẫn có trên argparse nhưng encoder mới không đọc. Muốn đúng độ sâu ViT-S/16 thì `--e_layers 12`.
+### Pretrained Weights (Optional)
 
-### Trọng số pretrained (tùy chọn)
-
-Mặc định **khởi tạo ngẫu nhiên** theo kiến trúc DINOv3, để train forecast không cần tải ~80MB. Muốn nạp checkpoint Meta, trước khi tạo model:
+By default, the model initializes randomly according to the DINOv3 specification, allowing local forecast training without downloading ~80MB checkpoints. To load Meta AI's official weights:
 
 ```python
 configs.dinov3_pretrained = True
-# configs.dinov3_model_id = "facebook/dinov3-vits16-pretrain-lvd1689m"  # mặc định
+# configs.dinov3_model_id = "facebook/dinov3-vits16-pretrain-lvd1689m"
 ```
 
-Cần `pip install -U transformers` (bản đã có `DINOv3ViTModel`) và `embed_dim=384`, `num_heads=6`. Hàm `DINOv3Encoder.load_pretrained` copy CLS, register, từng block (`norm`, `q/k/v/o_proj`, `mlp`, LayerScale) và `norm` cuối. **Không** copy patch-embed ảnh. Nếu `e_layers < 12`, chỉ copy bấy nhiêu block đầu và in cảnh báo.
+Requires `pip install -U transformers` and `embed_dim=384`, `num_heads=6`.
 
-Các khóa tùy chọn khác (đều có default đúng ViT-S/16):
+Configuration parameters:
 
-| configs | default | ý nghĩa |
-| --- | --- | --- |
-| `dinov3_layers` | `e_layers` | số block |
-| `dinov3_dim` | 384 | hidden size DINOv3 |
-| `dinov3_heads` | 6 | số head |
-| `dinov3_mlp_ratio` | 4.0 | FFN (ViT-S; ViT-S+ là SwiGLU ratio 6, không dùng ở đây) |
-| `dinov3_registers` | 4 | register / storage token |
-| `dinov3_layerscale` | 1e-5 | LayerScale init |
-| `dinov3_pretrained` | False | tải checkpoint HF |
-| `dinov3_model_id` | `facebook/dinov3-vits16-pretrain-lvd1689m` | id checkpoint |
+| Config Parameter | Default | Description |
+|---|---|---|
+| `dinov3_layers` | `e_layers` | Number of transformer blocks |
+| `dinov3_dim` | 384 | DINOv3 hidden dimension |
+| `dinov3_heads` | 6 | Number of attention heads |
+| `dinov3_mlp_ratio` | 4.0 | MLP expansion ratio |
+| `dinov3_registers` | 4 | Register / storage token count |
+| `dinov3_layerscale` | 1e-5 | LayerScale initialization |
+| `dinov3_pretrained` | False | Enable Hugging Face checkpoint loading |
+| `dinov3_model_id` | `facebook/dinov3-vits16-pretrain-lvd1689m` | Hugging Face model repository ID |
 
 ---
 
-## Kiểm tra shape
+## 5. Local Validation & Smoke Test Status
+
+Local forward and backward tensor integrity is verified via `check_forward.py`:
 
 ```bash
 pip install torch
-cd softs-dinov3
 python check_forward.py
 ```
 
-Kỳ vọng: input `[4, 96, 7]` → output `[4, 24, 7]` cả khi có và không có time mark, giá trị hữu hạn. In ra `encoder type: DINOv3Encoder`.
-
----
-
-## Luồng tensor
-
-```text
-x_enc [B, T, C]
-  -> (optional) instance norm
-  -> DataEmbedding_inverted        [B, C(+mark), d_model]     # không đổi
-  -> DINOv3Encoder
-        in_proj                    [B, L, 384]
-        pad thành lưới H×W + CLS + 4 register
-        × depth block (RoPE, LayerScale, MLP)
-        bỏ prefix/pad, out_proj    [B, L, d_model]
-  -> Linear(d_model, pred_len)     [B, L, pred_len]
-  -> permute, cắt còn C biến       [B, pred_len, C]
-  -> (optional) de-norm
-```
-
----
-
-## 5. Kết quả kiểm thử cục bộ (Validation Status / Smoke Test)
-
-Đã kiểm tra forward pass thành công với script `check_forward.py`:
-
-| Tiêu chí kiểm thử | Kết quả | Ghi chú |
+| Verification Criteria | Result | Notes |
 |---|---|---|
-| **Kích thước Tensor dự báo** | `(4, 24, 7)` | Khớp chính xác `[B, pred_len, C]` |
-| **Hỗ trợ Time Mark** | **Passed** | Xử lý đầy đủ cả khi có/không có dấu thời gian |
-| **Kiểm tra tính hữu hạn** | `torch.isfinite(y).all()` | Không bị NaN / Inf trong suy luận |
-| **Tổng tham số Encoder DINOv3** | `3,602,752` | 2 blocks ViT-S/16 với 6 attention heads |
+| **Forecast Tensor Shape** | `(4, 24, 7)` | Exactly matches `[B, pred_len, C]` |
+| **Time Mark Support** | **Passed** | Operates with and without temporal marks |
+| **Numerical Finiteness** | `torch.isfinite(y).all()` | No NaN / Inf in forward pass |
+| **Encoder Parameters** | `3,602,752` | 2 ViT-S/16 blocks with 6 attention heads |
 
 ---
 
-## 6. Tài liệu tham khảo (References)
+## 6. References
 
 - **SOFTS Paper:** Lu et al., *SOFTS: Efficient Multivariate Time Series Forecasting with Series-Core Fusion*, NeurIPS 2024. [arXiv:2404.14197](https://arxiv.org/abs/2404.14197).
 - **DINOv3:** Meta AI Research, *DINOv3: Advancing Self-Supervised Vision Models*. [facebookresearch/dinov3](https://github.com/facebookresearch/dinov3).
-- **QCVN 05:2023/BTNMT:** Quy chuẩn kỹ thuật quốc gia về chất lượng không khí xung quanh, Bộ Tài nguyên và Môi trường Việt Nam.
+- **QCVN 05:2023/BTNMT:** National Technical Regulation on Ambient Air Quality, Ministry of Natural Resources and Environment, Vietnam.
 
 ---
 
-## 7. Hướng dẫn nộp bài lên GitHub
+## 7. GitHub Submission Guide
 
+To publish and submit this repository for Practical Assignment 2 (Requirement 1):
 
-Để nộp link GitHub theo yêu cầu 1 của bài thực hành:
-
-1. Tạo một repository mới trên GitHub (ví dụ: `SOFTS-DINOv3-HanoiAir`).
-2. Mở terminal tại thư mục này và chạy các lệnh:
 ```bash
 git init
 git add .
@@ -196,5 +161,3 @@ git branch -M main
 git remote add origin https://github.com/<YOUR_USERNAME>/<REPO_NAME>.git
 git push -u origin main
 ```
-3. Copy link GitHub repository (kèm file README.md này đã ghi rõ vị trí sửa) để nộp cho thầy.
-
